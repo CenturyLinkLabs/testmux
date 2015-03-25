@@ -7,14 +7,15 @@ import (
 )
 
 // Router registers routes to be matched and dispatches the associated
-// handler. It will track handled requests to ensure that they are received
-// in the same order in which they were originally registered.
+// handler. It will track handled requests to ensure that all registered routes
+// are invoked and that they are received in the same order in which they were
+// originally registered.
 //
 // It implements the http.Hander interface.
 type Router struct {
 	routes []route
 	index  int
-	errors []string
+	errors []routeError
 }
 
 type route struct {
@@ -22,6 +23,20 @@ type route struct {
 	path    string
 	handler func(http.ResponseWriter, *http.Request)
 	visited bool
+}
+
+type errorType int
+
+const (
+	unvisited errorType = iota
+	unexpected
+	disorderly
+)
+
+type routeError struct {
+	fault  errorType
+	method string
+	path   string
 }
 
 // RegisterFunc registers a handler function for the given request method and
@@ -55,14 +70,23 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		rte.execute(w, req)
 
 		if !ordered {
-			r.addErrorf("Request out of order: %s %s", req.Method, req.URL.Path)
+			r.addError(disorderly, req.Method, req.URL.Path)
 		}
 	} else {
 		http.NotFound(w, req)
-		r.addErrorf("Unexpected request: %s %s", req.Method, req.URL.Path)
+		r.addError(unexpected, req.Method, req.URL.Path)
 	}
 
 	r.index++
+}
+
+// AssertVisited asserts that all of the registered routes were visited.
+// Conditions that will cause the assertion to fail include: requests received
+// for unregistered routes, and routes registered but never requested.
+//
+// Returns whether the assertion was successful (true) or not (false).
+func (r *Router) AssertVisited(t *testing.T) bool {
+	return r.assert(t, false)
 }
 
 // AssertVisited asserts that all of the registered routes were visited in the
@@ -71,23 +95,34 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // and routes registered but never requested.
 //
 // Returns whether the assertion was successful (true) or not (false).
-func (r *Router) AssertVisited(t *testing.T) bool {
+func (r *Router) AssertVisitedInOrder(t *testing.T) bool {
+	return r.assert(t, true)
+}
+
+func (r *Router) assert(t *testing.T, ordered bool) bool {
+	success := true
+
 	for _, rte := range r.routes {
 		if !rte.visited {
-			r.addErrorf("Unvisited route: %s %s", rte.method, rte.path)
+			r.addError(unvisited, rte.method, rte.path)
 		}
 	}
 
 	for _, err := range r.errors {
-		t.Error(err)
+		if err.fault == disorderly && !ordered {
+			continue
+		}
+
+		assertError(t, err)
+		success = false
 	}
 
-	return len(r.errors) == 0
+	return success
 }
 
-// Adds an error string to the internal collection.
-func (r *Router) addErrorf(format string, a ...interface{}) {
-	r.errors = append(r.errors, fmt.Sprintf(format, a...))
+// Adds an error to the internal collection.
+func (r *Router) addError(fault errorType, method, path string) {
+	r.errors = append(r.errors, routeError{fault, method, path})
 }
 
 // Given an HTTP method and request path, looks for a matching handler which
@@ -108,4 +143,15 @@ func (r *Router) match(method, path string) (*route, bool) {
 func (rte *route) execute(w http.ResponseWriter, req *http.Request) {
 	rte.handler(w, req)
 	rte.visited = true
+}
+
+func assertError(t *testing.T, err routeError) {
+	switch err.fault {
+	case unvisited:
+		t.Errorf("Unvisited route: %s %s", err.method, err.path)
+	case unexpected:
+		t.Errorf("Unexpected request: %s %s", err.method, err.path)
+	case disorderly:
+		t.Errorf("Request out of order: %s %s", err.method, err.path)
+	}
 }

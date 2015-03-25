@@ -88,7 +88,7 @@ func TestServeHTTP_UnexpectedRequest(t *testing.T) {
 	assert.Equal(t, 404, w.Code)
 
 	assert.Len(t, router.errors, 1)
-	assert.Contains(t, router.errors, "Unexpected request: PUT /foo")
+	assert.Contains(t, router.errors, routeError{unexpected, "PUT", "/foo"})
 }
 
 func TestServeHTTP_OutOfOrderRequest(t *testing.T) {
@@ -116,8 +116,8 @@ func TestServeHTTP_OutOfOrderRequest(t *testing.T) {
 	assert.Equal(t, 202, w.Code)
 
 	assert.Len(t, router.errors, 2)
-	assert.Contains(t, router.errors, "Request out of order: PUT /foo")
-	assert.Contains(t, router.errors, "Request out of order: GET /bar")
+	assert.Contains(t, router.errors, routeError{disorderly, "GET", "/bar"})
+	assert.Contains(t, router.errors, routeError{disorderly, "PUT", "/foo"})
 }
 
 func TestAssertVisited_Success(t *testing.T) {
@@ -129,7 +129,9 @@ func TestAssertVisited_Success(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	tt := &testing.T{}
-	router.AssertVisited(tt)
+	result := router.AssertVisited(tt)
+
+	assert.True(t, result)
 	assert.False(t, tt.Failed())
 }
 
@@ -138,9 +140,80 @@ func TestAssertVisited_UnvisitedRoute(t *testing.T) {
 	router.RegisterResp("GET", "/foo", 200, "")
 
 	tt := &testing.T{}
-	router.AssertVisited(tt)
+	result := router.AssertVisited(tt)
+
+	assert.False(t, result)
 	assert.True(t, tt.Failed())
 
 	assert.Len(t, router.errors, 1)
-	assert.Contains(t, router.errors, "Unvisited route: GET /foo")
+	assert.Contains(t, router.errors, routeError{unvisited, "GET", "/foo"})
+}
+
+func TestAssertVisited_OutOfOrderRoutes(t *testing.T) {
+	var w *httptest.ResponseRecorder
+	var req *http.Request
+
+	router := Router{}
+	router.RegisterResp("GET", "/foo", 200, "")
+	router.RegisterResp("GET", "/bar", 200, "")
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/bar", nil)
+	router.ServeHTTP(w, req)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/foo", nil)
+	router.ServeHTTP(w, req)
+
+	tt := &testing.T{}
+	result := router.AssertVisited(tt)
+
+	assert.True(t, result)
+	assert.False(t, tt.Failed())
+}
+
+func TestAssertVisitedInOrder_Success(t *testing.T) {
+	var w *httptest.ResponseRecorder
+	var req *http.Request
+
+	router := Router{}
+	router.RegisterResp("GET", "/foo", 200, "")
+	router.RegisterResp("GET", "/bar", 200, "")
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/foo", nil)
+	router.ServeHTTP(w, req)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/bar", nil)
+	router.ServeHTTP(w, req)
+
+	tt := &testing.T{}
+	result := router.AssertVisitedInOrder(tt)
+
+	assert.True(t, result)
+	assert.False(t, tt.Failed())
+}
+
+func TestAssertVisitedInOrder_OutOfOrderRoutes(t *testing.T) {
+	var w *httptest.ResponseRecorder
+	var req *http.Request
+
+	router := Router{}
+	router.RegisterResp("GET", "/foo", 200, "")
+	router.RegisterResp("GET", "/bar", 200, "")
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/bar", nil)
+	router.ServeHTTP(w, req)
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/foo", nil)
+	router.ServeHTTP(w, req)
+
+	tt := &testing.T{}
+	result := router.AssertVisitedInOrder(tt)
+
+	assert.False(t, result)
+	assert.True(t, tt.Failed())
 }

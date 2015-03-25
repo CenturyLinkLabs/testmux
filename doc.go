@@ -9,9 +9,12 @@ invoked for a matching request.
 
 Every time that a new request is dipatched via the ServeHTTP method, the router
 will track whether the request matches one of the registered handlers and if it
-was received in the correct sequence. The AssertVisited method can be used to
-check for any 1) requests received out of order, 2) requests received for
-unregistered routes, and 3) routes registered but never requested.
+was received in the correct sequence. There are two Assert methods that can be
+used to validate that all of the registered routes were exercised. AssertVisited
+will check for any requests received for unregistered routes and any registered
+routes that were never requested. AssertVisitedInOrder will do the same checks
+as AssertVisited while also verifying that requests were received in the same
+order they were originally registered.
 
 		func TestRequests(t *testing.T) {
 			// Instantiate testmux router and register new routes
@@ -27,7 +30,7 @@ unregistered routes, and 3) routes registered but never requested.
 			http.Get(server.URL+"/bar")
 
 			// Assert that all registered routes visited in the correct order
-			router.AssertVisited(t)
+			router.AssertVisitedInOrder(t)
 		}
 
 When registering routes, user's can use either the RegisterResp method
